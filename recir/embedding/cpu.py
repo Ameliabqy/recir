@@ -37,6 +37,7 @@ import torchrec
 from recir.embedding._sparse_arch_stub import DummySparseArch, sparse_arch_marker_prefix
 from recir.embedding._torchrec_patches import apply_seq_a2a_int64_patch
 from recir.embedding.backend import (
+    check_binding,
     EmbeddingBackend,
     EmbeddingSetupResult,
     SparseOptimizerRuntime,
@@ -145,7 +146,7 @@ class CPUEmbeddingBackend(EmbeddingBackend):
         # int32 sequence-embedding offsets overflow in torchrec's all-to-all at
         # large multi-host batch; see _torchrec_patches.
         apply_seq_a2a_int64_patch()
-        self._embedding_collection_fqn = embedding_collection_fqn
+        super().__init__(embedding_collection_fqn)
         # The model's own table objects, read here ONLY for their ``sharding``
         # field -- torchrec's ``EmbeddingConfig`` has no such field, so the
         # per-table ROW_WISE/DATA_PARALLEL choice cannot ride along with
@@ -210,6 +211,7 @@ class CPUEmbeddingBackend(EmbeddingBackend):
         device: torch.device,
         world_size: int,
     ) -> EmbeddingSetupResult:
+        check_binding(model, self.embedding_collection_fqn)
         if device.type != "cpu":
             raise ValueError(f"CPU backend requires a CPU device, got {device}.")
         # One path, always DMP. Without a process group this used to attach
@@ -269,7 +271,7 @@ class CPUEmbeddingBackend(EmbeddingBackend):
         if not replicated:
             return None, sharded
 
-        parent_path, _, attr = self._embedding_collection_fqn.rpartition(".")
+        parent_path, _, attr = self.embedding_collection_fqn.rpartition(".")
         parent = model.get_submodule(parent_path) if parent_path else model
         return split_embedding_collection(parent, attr, replicated), sharded
 
@@ -331,7 +333,7 @@ class CPUEmbeddingBackend(EmbeddingBackend):
         plan = planner.collective_plan(model, cast(Any, sharders), pg)
         if split is not None:
             assert_replicated_half_is_unplanned(
-                plan, split, self._embedding_collection_fqn
+                plan, split, self.embedding_collection_fqn
             )
         logger.info("DMP sharding plan:")
         for module_path, module_plan in plan.plan.items():

@@ -166,9 +166,10 @@ def init_jax_distributed() -> None:
     # Single-host (1 pod, e.g. the 2x2x1 one-shard run): do NOT call it.
     # jax.distributed.initialize() is for MULTI-process coordination; on a lone
     # pod it mis-initializes the runtime in a way that makes the subsequent eager
-    # get_override CPU forward raise (a caught error -> "Sparse arch forward hook
-    # did not fire"). jax auto-detects the local chips without it (the CPU-eager
-    # entry, which never calls it, builds get_override cleanly -- the proof).
+    # tracing-dispatcher CPU forward raise (a caught error -> "EmbeddingCollection
+    # forward hook did not fire"). jax auto-detects the local chips without it
+    # (the CPU-eager entry, which never calls it, builds the dispatchers cleanly
+    # -- the proof).
     # WORLD_SIZE is preserved when provided, otherwise derived from the
     # launcher-provided TPU process addresses.
     single_host = int(os.environ.get("WORLD_SIZE", "1")) == 1

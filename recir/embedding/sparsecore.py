@@ -32,6 +32,7 @@ import torch
 import torch.nn as nn
 from recir.embedding._sparse_arch_stub import DummySparseArch, sparse_arch_marker_prefix
 from recir.embedding.backend import (
+    check_binding,
     EmbeddingBackend,
     EmbeddingSetupResult,
     SparseOptimizerRuntime,
@@ -79,7 +80,7 @@ class SparseCoreEmbeddingBackend(EmbeddingBackend):
     """
 
     def __init__(self, embedding_collection_fqn: str) -> None:
-        self._embedding_collection_fqn = embedding_collection_fqn
+        super().__init__(embedding_collection_fqn)
         self._jax_ec: SparsecoreBackedEC | None = None
         # Shared mutable ref the model's sparse-arch dispatcher reads lazily
         # (install_graph fires after setup() has run).
@@ -118,6 +119,7 @@ class SparseCoreEmbeddingBackend(EmbeddingBackend):
         device: torch.device,
         world_size: int,
     ) -> EmbeddingSetupResult:
+        check_binding(model, self.embedding_collection_fqn)
         if not self._feature_padded_input_sizes:
             raise RuntimeError(
                 "SparseCoreEmbeddingBackend.set_feature_padded_input_sizes() "
@@ -149,7 +151,7 @@ class SparseCoreEmbeddingBackend(EmbeddingBackend):
         return {
             name: p
             for name, p in model.named_parameters()
-            if not name.startswith(self._embedding_collection_fqn + ".")
+            if not name.startswith(self.embedding_collection_fqn + ".")
         }
 
 

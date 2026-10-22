@@ -22,7 +22,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, List, Tuple
 
-import torch
+from recir.embedding import factory
 from recir.embedding.backend import (
     EmbeddingBackend,
     TableOptimizer,
@@ -38,7 +38,6 @@ from recir.examples.dlrmv3.common.model import (
     DlrmV3TrainModule,
     EMBEDDING_COLLECTION_FQN,
 )
-from recir.training.setup import build_sparse_lr_buffered_optimizer
 from torchrec.modules.embedding_configs import EmbeddingConfig
 
 SPARSE_ARCH_OVERRIDE_ID: int = 1
@@ -60,21 +59,19 @@ def build_embedding_backend(
     *,
     on_device_init: bool = True,
 ) -> EmbeddingBackend:
-    if name == "in_graph":
-        return InGraphEmbeddingBackend(
-            embedding_collection_fqn=EMBEDDING_COLLECTION_FQN,
-            sparse_optimizer_builder=build_sparse_lr_buffered_optimizer,
-            table_plans={
-                t: TablePlan(
-                    sharding=TableSharding.ROWWISE, optimizer=TableOptimizer.SPARSE
-                )
-                for t in tables
-            },
-            on_device_init=on_device_init,
-        )
-    if name == "cpu":
-        return CPUEmbeddingBackend(embedding_collection_fqn=EMBEDDING_COLLECTION_FQN)
-    raise ValueError(f"unknown embedding backend {name!r}; use one of {BACKENDS}")
+    if name not in BACKENDS:
+        raise ValueError(f"unknown embedding backend {name!r}; use one of {BACKENDS}")
+    return factory.build_embedding_backend(
+        name,
+        embedding_collection_fqn=EMBEDDING_COLLECTION_FQN,
+        table_plans={
+            t: TablePlan(
+                sharding=TableSharding.ROWWISE, optimizer=TableOptimizer.SPARSE
+            )
+            for t in tables
+        },
+        on_device_init=on_device_init,
+    )
 
 
 def prepare_backend(
