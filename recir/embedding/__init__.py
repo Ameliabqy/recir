@@ -21,15 +21,14 @@ Three backends share the ``EmbeddingBackend`` ABC from ``backend.py``:
   InGraphEmbeddingBackend             - ring-shift embedding lookup traced
     (in_graph.py)                       inside the compiled GSPMD program.
 
-All three are model-agnostic. A model binds them to its own architecture by
-passing what the constructors take (``embedding_collection_fqn``, the FQN of
-its torchrec ``EmbeddingCollection``, and ``sparse_optimizer_builder``) and by
-subclassing to add a model-specific ``get_override`` where tracing overrides
-are needed.
+All three are model-agnostic. Each binds the torchrec ``EmbeddingCollection``
+the model names by FQN; the model pairs the backend with its own tracing
+dispatchers.
 
-Import the concrete backends from their own submodules rather than from here,
-so a binary that only needs one does not link torchrec.distributed.* (heavy)
-or jax_tpu_embedding.
+``factory.build_embedding_backend`` picks a backend by name and so links all
+three. A binary that needs only one should construct it from its own submodule
+instead, so it does not link torchrec.distributed.* (heavy) or
+jax_tpu_embedding. This package re-exports only the interface.
 """
 
 from __future__ import annotations

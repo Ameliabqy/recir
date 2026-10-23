@@ -71,6 +71,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from recir.embedding.backend import (
+    check_binding,
     EmbeddingBackend,
     EmbeddingSetupResult,
     SparseOptimizerRuntime,
@@ -664,7 +665,7 @@ class InGraphEmbeddingBackend(EmbeddingBackend):
         table_plans: Dict[str, TablePlan],
         on_device_init: bool = True,
     ) -> None:
-        self._embedding_collection_fqn = embedding_collection_fqn
+        super().__init__(embedding_collection_fqn)
         self._sparse_optimizer_builder = sparse_optimizer_builder
         self._table_plans: Dict[str, TablePlan] = dict(table_plans)
         self._feature_seqlens: Dict[str, int] = {}
@@ -734,6 +735,7 @@ class InGraphEmbeddingBackend(EmbeddingBackend):
         device: torch.device,
         world_size: int,
     ) -> EmbeddingSetupResult:
+        check_binding(model, self.embedding_collection_fqn)
         if not self._feature_seqlens:
             raise RuntimeError(
                 "InGraphEmbeddingBackend.set_feature_seqlens() must run before setup()."
@@ -752,9 +754,9 @@ class InGraphEmbeddingBackend(EmbeddingBackend):
             f"InGraphEmbeddingBackend: on_device_init={self._on_device_init} "
             f"(meta param -> on-device HBM random init, no host alloc/H2D)"
         )
-        old_ec: Any = model.get_submodule(self._embedding_collection_fqn)
+        old_ec: Any = model.get_submodule(self.embedding_collection_fqn)
         _seed_in_graph_tables_from_ec(old_ec, new_ec)
-        swap_submodule(model, self._embedding_collection_fqn, new_ec)
+        swap_submodule(model, self.embedding_collection_fqn, new_ec)
 
         embedding_params = self.embedding_named_parameters(model)
         if not embedding_params:

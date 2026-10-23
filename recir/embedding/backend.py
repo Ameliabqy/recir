@@ -11,10 +11,9 @@ callers (and the quantization hooks) can depend on the interface without
 pulling in the ~500 MiB JAX/SparseCore stack. The concrete backends live in
 ``cpu.py``, ``sparsecore.py``, and ``in_graph.py``.
 
-Models bind a backend to their own architecture by supplying what the concrete
-backends accept (``embedding_collection_fqn``, ``sparse_optimizer_builder``)
-and, where tracing overrides are needed, by
-subclassing to add a model-specific ``get_override``.
+A backend binds the torchrec ``EmbeddingCollection`` the model names by FQN
+(``embedding_collection_fqn``); ``factory.build_embedding_backend`` picks one by
+name. The model pairs it with its own tracing dispatchers.
 """
 
 from __future__ import annotations
@@ -27,9 +26,14 @@ from typing import Dict, Sequence
 
 import torch
 import torch.nn as nn
+from recir.embedding.split_collection import ReplicatedEmbeddingCollection
 from recir.training.optim import OptimConfig
 from torchrec.distributed.types import ShardingType
 from torchrec.modules.embedding_configs import BaseEmbeddingConfig
+from torchrec.modules.embedding_modules import (
+    EmbeddingBagCollection,
+    EmbeddingCollection,
+)
 from torchrec.optim.keyed import KeyedOptimizer
 
 logger: logging.Logger = logging.getLogger(__name__)
@@ -143,12 +147,44 @@ def swap_submodule(model: nn.Module, fqn: str, replacement: nn.Module) -> nn.Mod
     return original
 
 
+def check_binding(model: nn.Module, embedding_collection_fqn: str) -> None:
+    """Raise unless ``embedding_collection_fqn`` names the model's one sharded
+    torchrec collection.
+
+    Every backend's ``setup()`` runs this first. Any other ``EmbeddingCollection`` or
+    ``EmbeddingBagCollection`` must be a ``ReplicatedEmbeddingCollection``:
+    the backend shards only the bound one, so a second sharded table would be
+    traced into the program as a full replica instead.
+    """
+    bound = model.get_submodule(embedding_collection_fqn)
+    if not isinstance(bound, EmbeddingCollection):
+        raise TypeError(
+            f"{embedding_collection_fqn} is a {type(bound).__name__}, not a "
+            "torchrec EmbeddingCollection"
+        )
+    unbound = [
+        fqn
+        for fqn, module in model.named_modules()
+        if isinstance(module, (EmbeddingCollection, EmbeddingBagCollection))
+        and not isinstance(module, ReplicatedEmbeddingCollection)
+        and module is not bound
+    ]
+    if unbound:
+        raise ValueError(
+            f"the embedding backend binds only {embedding_collection_fqn}, but "
+            f"these collections would be traced in as full replicas: {unbound}"
+        )
+
+
 class EmbeddingBackend(ABC):
     """Backend-agnostic interface for embedding storage, lookup, and PG init.
 
-    Models add get_override() with model-specific signature since the
-    override type and arguments differ between model architectures.
+    ``embedding_collection_fqn`` names the model's torchrec ``EmbeddingCollection``,
+    the one module the backend binds; ``setup()`` runs :func:`check_binding` first.
     """
+
+    def __init__(self, embedding_collection_fqn: str) -> None:
+        self.embedding_collection_fqn: str = embedding_collection_fqn
 
     @abstractmethod
     def init_pg(self) -> tuple[int, int]:

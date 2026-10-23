@@ -526,8 +526,8 @@ def compile_gspmd_step(
     Builds the GSPMD parallel mode + XLA backend and delegates to
     ``compile_step`` with the preproc + sparse-arch graph ``dispatchers`` (which
     turn the eager sparse arch / preprocessor into XLA-lowerable custom ops via
-    install_eager + install_graph; built by the family's
-    ``backend.get_override``). Passes the
+    install_eager + install_graph; built by the model's own tracing-dispatcher
+    builder). Passes the
     SINGLE ``dense_opt`` to the shared ``recir_train_step`` -- only the dense opt
     steps in the GM; the sparse embedding update is owned by the embedding backend
     (SparseCore / FBGEMM-fused DMP) and fires off-GM via its backward hook.

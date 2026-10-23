@@ -8,11 +8,23 @@
 
 """Backends bind to the model's EmbeddingCollection by its FQN."""
 
-from unittest import TestCase
+from unittest import mock, TestCase
 
+import torch
 import torch.nn as nn
-from recir.embedding.backend import swap_submodule
+from recir.embedding.backend import check_binding, swap_submodule
+from recir.embedding.cpu import CPUEmbeddingBackend
 from recir.embedding.sparsecore import SparseCoreEmbeddingBackend
+from recir.embedding.split_collection import ReplicatedEmbeddingCollection
+from torchrec.modules.embedding_configs import EmbeddingBagConfig, EmbeddingConfig
+from torchrec.modules.embedding_modules import (
+    EmbeddingBagCollection,
+    EmbeddingCollection,
+)
+
+_TABLES = [
+    EmbeddingConfig(name="t", embedding_dim=4, num_embeddings=8, feature_names=["f"])
+]
 
 
 class _Owner(nn.Module):
@@ -32,6 +44,23 @@ class _Model(nn.Module):
 
 def _model() -> _Model:
     return _Model()
+
+
+class _CollectionOwner(nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+        self.collection: nn.Module = EmbeddingCollection(
+            tables=_TABLES, device=torch.device("meta")
+        )
+
+
+class _CollectionModel(nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+        self.owner: _CollectionOwner = _CollectionOwner()
+        self.replicated: nn.Module = ReplicatedEmbeddingCollection(
+            tables=_TABLES, device=torch.device("meta")
+        )
 
 
 class SwapSubmoduleTest(TestCase):
@@ -75,3 +104,52 @@ class SparseCoreDenseParametersTest(TestCase):
                 "owner.collection_b.bias",
             },
         )
+
+
+class CheckBindingTest(TestCase):
+    def test_a_replicated_collection_may_sit_beside_the_bound_one(self) -> None:
+        check_binding(_CollectionModel(), "owner.collection")
+
+    def test_a_second_sharded_collection_is_named(self) -> None:
+        model = _CollectionModel()
+        model.owner.add_module(
+            "other", EmbeddingCollection(tables=_TABLES, device=torch.device("meta"))
+        )
+
+        with self.assertRaisesRegex(ValueError, "owner.other"):
+            check_binding(model, "owner.collection")
+
+    def test_a_bag_collection_is_named(self) -> None:
+        model = _CollectionModel()
+        model.add_module(
+            "ebc",
+            EmbeddingBagCollection(
+                tables=[
+                    EmbeddingBagConfig(
+                        name="b", embedding_dim=4, num_embeddings=8, feature_names=["g"]
+                    )
+                ],
+                device=torch.device("meta"),
+            ),
+        )
+
+        with self.assertRaisesRegex(ValueError, "ebc"):
+            check_binding(model, "owner.collection")
+
+    def test_the_fqn_must_name_an_embedding_collection(self) -> None:
+        with self.assertRaises(TypeError):
+            check_binding(_CollectionModel(), "owner")
+
+    def test_setup_checks_the_binding_first(self) -> None:
+        for backend in (
+            CPUEmbeddingBackend("owner"),
+            SparseCoreEmbeddingBackend("owner"),
+        ):
+            with self.assertRaisesRegex(TypeError, "owner is a"):
+                backend.setup(
+                    _CollectionModel(),
+                    table_configs=_TABLES,
+                    sparse_config=mock.Mock(),
+                    device=torch.device("cpu"),
+                    world_size=1,
+                )
